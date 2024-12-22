@@ -1,33 +1,19 @@
-use std::collections::HashSet;
-
 #[tauri::command]
 fn generate_function_signature(code: &str) -> String {
-    let opcode_skip: HashSet<&str> = [
-        "jmp", "je", "jne", "jle", "jl", "jge", "jg", "call"
-    ].into_iter().collect();
-
     let lines: Vec<&str> = code.lines().collect();
     let mut signature = Vec::new();
-
+    
     for line in lines {
         if line.trim().is_empty() {
             continue;
         }
 
-        let (bytes_part, instruction_part) = match line.split_once('-') {
+        let (bytes_part, _instruction_part) = match line.split_once('-') {
             Some((bytes, instr)) => (bytes.trim(), instr.trim()),
             None => continue,
         };
 
-        let first_word = instruction_part
-            .split_whitespace()
-            .next()
-            .unwrap_or("")
-            .trim_matches('"');
-
-        let should_skip = opcode_skip.iter()
-            .any(|&skip_op| first_word == skip_op);
-
+        // Parse bytes from the line
         let bytes: Vec<String> = bytes_part
             .split_whitespace()
             .flat_map(|b| {
@@ -43,16 +29,23 @@ fn generate_function_signature(code: &str) -> String {
             })
             .collect();
 
-        if should_skip && !bytes.is_empty() {
+        if bytes.len() == 1 {
+            // Single byte instructions (like push rbp) - keep as is
             signature.push(bytes[0].clone());
-            for _ in 1..bytes.len() {
-                signature.push("??".to_string());
-            }
-        } else {
-            for (i, byte) in bytes.into_iter().enumerate() {
-                if i < 2 {
-                    signature.push(byte);
-                } else {
+        } else if bytes.len() >= 2 {
+            // Keep the first byte always
+            signature.push(bytes[0].clone());
+            
+            // For REX prefixes (0x48), keep the next byte too
+            if bytes[0] == "48" && bytes.len() > 1 {
+                signature.push(bytes[1].clone());
+                // Wildcard the rest
+                for _ in 2..bytes.len() {
+                    signature.push("??".to_string());
+                }
+            } else {
+                // For other instructions, wildcard after first byte
+                for _ in 1..bytes.len() {
                     signature.push("??".to_string());
                 }
             }
